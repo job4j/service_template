@@ -1,0 +1,26 @@
+package tracing
+
+import (
+	"context"
+	"errors"
+
+	"{{.ModulePath}}/internal/config"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+)
+
+func Init(ctx context.Context, cfg config.Config) (func(context.Context) error, error) {
+	if !cfg.Tracing.Enabled { return func(context.Context) error { return nil }, nil }
+	exporter, err := otlptracehttp.New(ctx, otlptracehttp.WithEndpoint(cfg.Tracing.Endpoint), otlptracehttp.WithInsecure())
+	if err != nil { return nil, err }
+	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(semconv.SchemaURL,
+		semconv.ServiceName(cfg.App.Name), semconv.ServiceVersion(cfg.App.Version), semconv.DeploymentEnvironment(cfg.App.Environment)))
+	if err != nil { return nil, err }
+	provider := sdktrace.NewTracerProvider(sdktrace.WithBatcher(exporter), sdktrace.WithResource(res), sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(cfg.Tracing.SampleRatio))))
+	otel.SetTracerProvider(provider); otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	return func(shutdownCtx context.Context) error { return errors.Join(provider.ForceFlush(shutdownCtx), provider.Shutdown(shutdownCtx)) }, nil
+}

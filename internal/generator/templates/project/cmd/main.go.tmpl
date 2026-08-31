@@ -1,0 +1,58 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os/signal"
+	"syscall"
+	"time"
+
+	contractapi "{{.ModulePath}}/api"
+	"{{.ModulePath}}/internal/config"
+	appmiddleware "{{.ModulePath}}/internal/middleware"
+	"{{.ModulePath}}/internal/observability/logging"
+	"{{.ModulePath}}/internal/observability/metrics"
+	"{{.ModulePath}}/internal/observability/tracing"
+	"{{.ModulePath}}/internal/repository"
+
+	"github.com/gofiber/adaptor/v2"
+	"github.com/gofiber/contrib/otelfiber/v2"
+	"github.com/gofiber/contrib/swagger"
+	"github.com/gofiber/fiber/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+func main() {
+	if err := run(); err != nil { log.Fatal(err) }
+}
+
+func run() error {
+	cfg, err := config.Load(); if err != nil { return fmt.Errorf("load config: %w", err) }
+	logger, closeLogger, err := logging.New(cfg); if err != nil { return fmt.Errorf("initialize logging: %w", err) }; defer closeLogger()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM); defer stop()
+	shutdownTracing, err := tracing.Init(ctx, cfg); if err != nil { return fmt.Errorf("initialize tracing: %w", err) }
+	defer func() { shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second); defer cancel(); if err := shutdownTracing(shutdownCtx); err != nil { logger.Error("shutdown tracing", "error", err) } }()
+
+	if cfg.Database.Enabled { pool, err := repository.OpenPostgres(ctx, cfg.Database.URL); if err != nil { return err }; defer pool.Close(); logger.Info("postgres connected") }
+	registry := prometheus.NewRegistry(); registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})); httpMetrics := metrics.NewHTTP(registry, cfg.App.Name)
+
+	app := fiber.New()
+	app.Use(otelfiber.Middleware())
+	app.Use(appmiddleware.RequestContext(logger))
+	app.Use(appmiddleware.HTTPMetrics(httpMetrics, cfg.Metrics.Path))
+	app.Use(swagger.New(swagger.Config{
+		BasePath: "/",
+		FilePath: "./api/contract.yaml",
+		Path:     "docs",
+		Title:    "{{.ServiceName}} API documentation",
+	}))
+	app.Get(cfg.Metrics.Path, adaptor.HTTPHandler(promhttp.HandlerFor(registry, promhttp.HandlerOpts{})))
+	contractapi.RegisterRoutes(app)
+
+	listenErrors := make(chan error, 1); go func() { listenErrors <- app.Listen(fmt.Sprintf(":%d", cfg.HTTP.Port)) }()
+	logger.Info("service started", "port", cfg.HTTP.Port, "docs", "/docs", "metrics", cfg.Metrics.Path)
+	select { case <-ctx.Done(): logger.Info("shutdown requested"); shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second); defer cancel(); return app.ShutdownWithContext(shutdownCtx); case err := <-listenErrors: return err }
+}

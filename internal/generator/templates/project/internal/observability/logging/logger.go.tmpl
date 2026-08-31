@@ -1,0 +1,29 @@
+package logging
+
+import (
+	"fmt"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"{{.ModulePath}}/internal/config"
+)
+
+func New(cfg config.Config) (*slog.Logger, func() error, error) {
+	level, err := parseLevel(cfg.Log.Level); if err != nil { return nil, nil, err }
+	var output io.Writer = os.Stdout
+	cleanup := func() error { return nil }
+	if cfg.Log.File != "" {
+		if err := os.MkdirAll(filepath.Dir(cfg.Log.File), 0o755); err != nil { return nil, nil, fmt.Errorf("create log directory: %w", err) }
+		file, err := os.OpenFile(cfg.Log.File, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644); if err != nil { return nil, nil, fmt.Errorf("open log file: %w", err) }
+		output = io.MultiWriter(os.Stdout, file); cleanup = file.Close
+	}
+	logger := slog.New(slog.NewJSONHandler(output, &slog.HandlerOptions{Level: level})).With("service", cfg.App.Name, "version", cfg.App.Version, "environment", cfg.App.Environment)
+	slog.SetDefault(logger); return logger, cleanup, nil
+}
+
+func parseLevel(value string) (slog.Level, error) {
+	switch strings.ToLower(value) { case "debug": return slog.LevelDebug, nil; case "info": return slog.LevelInfo, nil; case "warn", "warning": return slog.LevelWarn, nil; case "error": return slog.LevelError, nil; default: return 0, fmt.Errorf("unknown LOG_LEVEL %q", value) }
+}

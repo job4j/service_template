@@ -1,0 +1,32 @@
+# Подключение к локальной observability-платформе
+
+Сервис уже отправляет трассы в OTel Collector по адресу `localhost:4319`, публикует метрики на `http://localhost:{{.HTTPPort}}/metrics` и пишет JSON-логи одновременно в stdout и `logs/app.log`.
+
+## Prometheus и Grafana
+
+Добавьте в центральный `prometheus.yml` отдельную конфигурацию обнаружения целей:
+
+```yaml
+scrape_configs:
+  - job_name: generated-services
+    file_sd_configs:
+      - files:
+          - /etc/prometheus/targets/*.yml
+```
+
+Смонтируйте каталог с целями в контейнер Prometheus:
+
+```yaml
+volumes:
+  - ./prometheus/targets:/etc/prometheus/targets:ro
+```
+
+Скопируйте `prometheus-target.yml` из этого каталога в `./prometheus/targets/`. В Grafana используйте источник Prometheus `http://prometheus:9090` и импортируйте `grafana-dashboard.json`.
+
+## Loki
+
+`alloy-config.alloy` содержит фрагмент для чтения `logs/app.log`. Добавьте его в конфигурацию Alloy и смонтируйте каталог логов сервиса в контейнер как `/var/log/{{.ServiceName}}`. Существующий блок `loki.write.default` должен отправлять данные на `http://loki:3100/loki/api/v1/push`.
+
+## Jaeger
+
+Трассы проходят по цепочке `сервис -> OTel Collector -> Jaeger`. Откройте `http://localhost:16686` и выберите сервис `{{.ServiceName}}`. Заголовок `X-Request-ID` возвращается клиенту и записывается в лог и атрибут span; `X-Trace-ID` помогает сразу найти конкретную трассу.

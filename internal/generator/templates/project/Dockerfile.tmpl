@@ -1,0 +1,19 @@
+FROM golang:1.24-alpine AS build
+
+WORKDIR /src
+
+COPY go.mod ./
+RUN go mod download
+
+COPY . .
+RUN go build -o /out/service ./cmd
+
+FROM alpine:3.22
+
+WORKDIR /app
+COPY --from=build /out/service ./service
+COPY api/contract.yaml ./api/contract.yaml
+
+EXPOSE 8080
+
+ENTRYPOINT ["./service"]

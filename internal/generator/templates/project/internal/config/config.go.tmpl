@@ -1,0 +1,59 @@
+package config
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+)
+
+type Config struct {
+	App      AppConfig
+	HTTP     HTTPConfig
+	Log      LogConfig
+	Database DatabaseConfig
+	Tracing  TracingConfig
+	Metrics  MetricsConfig
+}
+
+type AppConfig struct { Name, Version, Environment string }
+type HTTPConfig struct { Port int }
+type LogConfig struct { Level, File string }
+type DatabaseConfig struct { Enabled bool; URL string }
+type TracingConfig struct { Enabled bool; Endpoint string; SampleRatio float64 }
+type MetricsConfig struct { Path string }
+
+func Load() (Config, error) {
+	if err := loadDotEnv(".env"); err != nil { return Config{}, err }
+	port, err := envInt("HTTP_PORT", {{.HTTPPort}}); if err != nil { return Config{}, err }
+	dbEnabled, err := envBool("DB_ENABLED", false); if err != nil { return Config{}, err }
+	otelEnabled, err := envBool("OTEL_ENABLED", true); if err != nil { return Config{}, err }
+	ratio, err := envFloat("OTEL_SAMPLE_RATIO", 1); if err != nil { return Config{}, err }
+	if port < 1 || port > 65535 { return Config{}, fmt.Errorf("HTTP_PORT must be between 1 and 65535") }
+	if ratio < 0 || ratio > 1 { return Config{}, fmt.Errorf("OTEL_SAMPLE_RATIO must be between 0 and 1") }
+	return Config{
+		App: AppConfig{env("APP_NAME", "{{.ServiceName}}"), env("APP_VERSION", "0.1.0"), env("APP_ENV", "local")},
+		HTTP: HTTPConfig{port}, Log: LogConfig{env("LOG_LEVEL", "info"), env("LOG_FILE", "logs/app.log")},
+		Database: DatabaseConfig{dbEnabled, env("DATABASE_URL", "postgres://postgres:password@localhost:6543/postgres?sslmode=disable")},
+		Tracing: TracingConfig{otelEnabled, env("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4319"), ratio},
+		Metrics: MetricsConfig{env("METRICS_PATH", "/metrics")},
+	}, nil
+}
+
+func env(key, fallback string) string { if value, ok := os.LookupEnv(key); ok { return value }; return fallback }
+func envInt(key string, fallback int) (int, error) { value := env(key, strconv.Itoa(fallback)); result, err := strconv.Atoi(value); if err != nil { return 0, fmt.Errorf("%s: %w", key, err) }; return result, nil }
+func envBool(key string, fallback bool) (bool, error) { value := env(key, strconv.FormatBool(fallback)); result, err := strconv.ParseBool(value); if err != nil { return false, fmt.Errorf("%s: %w", key, err) }; return result, nil }
+func envFloat(key string, fallback float64) (float64, error) { value := env(key, strconv.FormatFloat(fallback, 'f', -1, 64)); result, err := strconv.ParseFloat(value, 64); if err != nil { return 0, fmt.Errorf("%s: %w", key, err) }; return result, nil }
+
+func loadDotEnv(path string) error {
+	file, err := os.Open(path); if os.IsNotExist(err) { return nil }; if err != nil { return fmt.Errorf("open %s: %w", path, err) }; defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text()); if line == "" || strings.HasPrefix(line, "#") { continue }
+		key, value, found := strings.Cut(line, "="); if !found { return fmt.Errorf("invalid line in %s: %q", path, line) }
+		key, value = strings.TrimSpace(key), strings.Trim(strings.TrimSpace(value), "\"'")
+		if key == "" { return fmt.Errorf("empty key in %s", path) }; if _, exists := os.LookupEnv(key); !exists { if err := os.Setenv(key, value); err != nil { return err } }
+	}
+	if err := scanner.Err(); err != nil { return fmt.Errorf("read %s: %w", path, err) }; return nil
+}

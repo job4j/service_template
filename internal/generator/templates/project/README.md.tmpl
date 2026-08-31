@@ -1,0 +1,40 @@
+# {{.ServiceName}}
+
+Go microservice generated with `servicegen`.
+
+## Structure
+
+```text
+api/                  OpenAPI contract and HTTP handlers
+cmd/                  application entry point
+gen/                  generated OpenAPI code
+internal/service/     orchestration, transactions, external calls
+internal/domain/      aggregates, state transitions, rules, policies
+internal/repository/  persistence and database entities
+migrations/           database migrations
+observability/         Prometheus, Grafana, and Alloy integration files
+```
+
+## Run
+
+```bash
+make tools
+make generate
+make run
+```
+
+The service listens on `http://localhost:{{.HTTPPort}}`.
+
+Copy `.env.example` to `.env` when you want to change local settings. Real environment variables have priority over values from `.env`.
+
+Swagger UI is available at `http://localhost:{{.HTTPPort}}/docs` and Prometheus metrics at `http://localhost:{{.HTTPPort}}/metrics`.
+
+Healthcheck:
+
+```text
+GET http://localhost:{{.HTTPPort}}/health
+```
+
+Every HTTP response contains `X-Request-ID`. The same value is written to the structured JSON log and attached to the OpenTelemetry span. Traces are sent to `localhost:4319` by default; database initialization is disabled until `DB_ENABLED=true`.
+
+See `observability/README.md` for connection steps for Prometheus, Grafana, Loki, Alloy, and Jaeger.

@@ -1,0 +1,18 @@
+package middleware
+
+import (
+	"strconv"
+	"time"
+
+	observability "{{.ModulePath}}/internal/observability/metrics"
+	"github.com/gofiber/fiber/v2"
+)
+
+func HTTPMetrics(metrics *observability.HTTP, metricsPath string) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if c.Path() == metricsPath { return c.Next() }
+		started := time.Now(); err := c.Next(); route := c.Path(); if c.Route() != nil && c.Route().Path != "" { route = c.Route().Path }
+		status := strconv.Itoa(c.Response().StatusCode()); labels := []string{c.Method(), route, status}
+		metrics.Requests.WithLabelValues(labels...).Inc(); metrics.Duration.WithLabelValues(labels...).Observe(time.Since(started).Seconds()); return err
+	}
+}

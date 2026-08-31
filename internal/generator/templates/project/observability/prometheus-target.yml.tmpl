@@ -1,0 +1,5 @@
+- targets: ["host.docker.internal:{{.HTTPPort}}"]
+  labels:
+    job: "{{.ServiceName}}"
+    service: "{{.ServiceName}}"
+    environment: "local"

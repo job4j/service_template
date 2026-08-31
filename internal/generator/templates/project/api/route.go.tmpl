@@ -1,0 +1,18 @@
+package api
+
+import (
+	"{{.ModulePath}}/gen"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+type Server struct{}
+
+func NewServer() *Server {
+	return &Server{}
+}
+
+func RegisterRoutes(router fiber.Router) {
+	gen.RegisterHandlers(router, NewServer())
+}
+

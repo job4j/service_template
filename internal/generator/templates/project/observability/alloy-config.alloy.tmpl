@@ -1,0 +1,12 @@
+local.file_match "generated_service" {
+  path_targets = [{
+    __path__    = "/var/log/{{.ServiceName}}/app.log",
+    service     = "{{.ServiceName}}",
+    environment = "local",
+  }]
+}
+
+loki.source.file "generated_service" {
+  targets    = local.file_match.generated_service.targets
+  forward_to = [loki.write.default.receiver]
+}

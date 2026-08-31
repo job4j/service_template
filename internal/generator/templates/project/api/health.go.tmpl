@@ -1,0 +1,14 @@
+package api
+
+import (
+	"{{.ModulePath}}/gen"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+func (s *Server) Health(ctx *fiber.Ctx) error {
+	return ctx.Status(fiber.StatusOK).JSON(gen.HealthResponse{
+		Status: "ok",
+	})
+}
+
